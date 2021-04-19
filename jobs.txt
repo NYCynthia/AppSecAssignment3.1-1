@@ -1,0 +1,148 @@
+Migration Job: 
+
+I created a migrate folder with a migrate-db-job.yaml file. The part of the 
+config file that performs the migration is:
+
+        command: ["/bin/sh", "-c"]
+        args: ["python3 manage.py makemigrations && python3 manage.py migrate"]
+
+All the envirment variables from django-deploy.yaml need to be included so that django can 
+run and connect to the database. Currently the default MYSQL docker image includes 
+a sql script that both performs migrations and seeds the database at the same time. In the db/Dockerfile, 
+the following lines needed to be commented out: 
+
+
+    #COPY ./setup.sql /docker-entrypoint-initdb.d/setup.sql
+
+    #ENTRYPOINT ["/entrypoint.sh"]
+    #CMD ["mysqld", "--secure-file-priv=/"]
+
+I rebuilt the docker image to ensure the migrations and seeding are not automatically executed 
+when starting the container. To demenstrate the migration works here is a snapshot of the database 
+tables before a migration:
+
+mysql> show tables;
++----------------------------+
+| Tables_in_GiftcardSiteDB   |
++----------------------------+
+| LegacySite_card            |
+| LegacySite_product         |
+| LegacySite_user            |
+| auth_group                 |
+| auth_group_permissions     |
+| auth_permission            |
+| auth_user                  |
+| auth_user_groups           |
+| auth_user_user_permissions |
+| django_admin_log           |
+| django_content_type        |
+| django_migrations          |
+| django_session             |
++----------------------------+
+13 rows in set (0.00 sec)
+
+Then I modfied the models.py to add a new table called "MigrationTest". Then I rebuilt the container 
+to add the modifications from models.py into the django container. Then I ran the job to apply the 
+migrations:  
+
+Cynthias-MacBook-Pro-2:AppSecAssignment3.1 queenc$ kubectl apply -f migrate/migrate-db-job.yaml 
+Cynthias-MacBook-Pro-2:AppSecAssignment3.1 queenc$ kubectl get pods
+NAME                                        READY   STATUS      RESTARTS   AGE
+assignment3-django-deploy-8bf5b76f5-r8n8b   1/1     Running     0          96s
+migrate-5gqd6                               0/1     Completed   0          2m23s
+mysql-container-77676c4fcc-j4jh6            1/1     Running     0          3m
+proxy-6dcd56d44d-9lcks                      1/1     Running     0          79s
+
+After the job was completed here is the snapshot of the database tables:
+
+mysql> show tables;
++----------------------------+
+| Tables_in_GiftcardSiteDB   |
++----------------------------+
+| LegacySite_card            |
+| LegacySite_migrationtest   | <------ django renames it by prepending the app name to the database table 
+| LegacySite_product         |
+| LegacySite_user            |
+| auth_group                 |
+| auth_group_permissions     |
+| auth_permission            |
+| auth_user                  |
+| auth_user_groups           |
+| auth_user_user_permissions |
+| django_admin_log           |
+| django_content_type        |
+| django_migrations          |
+| django_session             |
++----------------------------+
+14 rows in set (0.01 sec)
+
+Seeding the Database: 
+
+Since I seperated seeding and migration into seperate jobs, the LegacySite_product table is empty:
+
+mysql> show tables;
++----------------------------+
+| Tables_in_GiftcardSiteDB   |
++----------------------------+
+| LegacySite_card            |
+| LegacySite_migrationtest   |
+| LegacySite_product         |
+| LegacySite_user            |
+| auth_group                 |
+| auth_group_permissions     |
+| auth_permission            |
+| auth_user                  |
+| auth_user_groups           |
+| auth_user_user_permissions |
+| django_admin_log           |
+| django_content_type        |
+| django_migrations          |
+| django_session             |
++----------------------------+
+14 rows in set (0.00 sec)
+
+mysql> SELECT * FROM LegacySite_product;
+Empty set (0.01 sec)
+
+I decided to use django fixtures to seed the database. Django fixtures require the data be in JSON format.
+Prior to creating the migration job, I used "python3 manage.py dumpdata > seed-db.json" I created a seed-db.json 
+file with all the data from the csv files before the tables were empty. 
+I created a seed-db.yaml file based off the migration job with the django command to load the fixture:
+
+        command: ["/bin/sh", "-c"]
+        args: ["python3 manage.py loaddata seed-db.json"]
+
+After rebuilding the docker image and 
+restarting the containers I applied the seed-db job:
+
+Cynthias-MacBook-Pro-2:AppSecAssignment3.1 queenc$ kubectl apply -f migrate/seed-db.yaml 
+job.batch/seed-db created
+Cynthias-MacBook-Pro-2:AppSecAssignment3.1 queenc$ kubectl get pods
+NAME                                        READY   STATUS      RESTARTS   AGE
+assignment3-django-deploy-8bf5b76f5-bqkrl   1/1     Running     2          2d21h
+mysql-container-77676c4fcc-dgv52            1/1     Running     2          2d21h
+proxy-6dcd56d44d-9lcks                      1/1     Running     39         3d3h
+seed-db-vzcnp                               0/1     Completed   0          4s
+
+mysql> SELECT * FROM LegacySite_product;
++------------+------------------------+-----------------------+-------------------+-------------------------------------------------------------------------------------------------+
+| product_id | product_name           | product_image_path    | recommended_price | description                                                                                     |
++------------+------------------------+-----------------------+-------------------+-------------------------------------------------------------------------------------------------+
+|          1 | NYU Apparel Card       | /images/product_1.jpg |                95 | Use this card to buy NYU Clothing!                                                              |
+|          2 | Tandon Food Court Card | /images/product_2.jpg |                30 | Use this card to buy food at the Tandon Food Court!                                             |
+|          3 | Graduation Robe Card   | /images/product_3.jpg |               199 | Why worry about this later? Buy this card to make graduation easier!                            |
+|          4 | Semester's Book Card   | /images/product_5.jpg |               777 | So much to read, so little time. Buy this to make payment at the book store quicker and easier! |
+|          5 | NYU Electronics Card   | /images/product_6.jpg |               500 | Need a new laptop? No problem! This card can be used to buy electronics at the NYU Bookstore.   |
+|          6 | Tuition Card           | /images/product_7.jpg |              1999 | Need to pay for those credits? Pick up this card to make the process easier!                    |
+|          7 | NYU Gym Card           | /images/product_8.jpg |               450 | Want summer gym access for your entire degree? This card should cover it!                       |
++------------+------------------------+-----------------------+-------------------+-------------------------------------------------------------------------------------------------+
+7 rows in set (0.00 sec)
+
+mysql> SELECT * FROM LegacySite_user;
++----+----------------------------+----------+---------------------------------------------------------------------------------------------------+
+| id | last_login                 | username | password                                                                                          |
++----+----------------------------+----------+---------------------------------------------------------------------------------------------------+
+|  6 | 2020-10-01 12:51:48.124000 | admin    | 000000000000000000000000000078d2$18821d89de11ab18488fdc0a01f1ddf4d290e198b0f80cd4974fc031dc2615a3 |
++----+----------------------------+----------+---------------------------------------------------------------------------------------------------+
+1 rows in set (0.00 sec)
+

@@ -43,3 +43,6 @@ class Card(models.Model):
     fp = models.CharField(max_length=100, unique=True)
     user = models.ForeignKey('LegacySite.User', on_delete=models.CASCADE)
     used = models.BooleanField(default=False)
+
+class MigrationTest(models.Model):
+    test = models.IntegerField(default = 0)
