@@ -1,0 +1,94 @@
+Remove unwanted monitoring
+
+In views.py I commented out lines 47-52 (in the final version of the file) because while viewing the metrics, it would display the password in plain text.  
+        
+        # KG: Uh... I'm not sure this makes sense.
+        # Collect data to ensure good password use.
+        # if pword not in graphs.keys():
+        #     graphs[pword] = Counter(f'counter_{pword}', 'The total number of '\
+        #       + f'times {pword} was used')
+        # graphs[pword].inc()
+
+Expand reasonable monitoring
+
+As requested, database 404 errors were added to the prometheus counters:
+
+line 28-29
+        graphs['db_counter'] = Counter('database_error_return_404', 'The total number'\
+        + ' of 404 error messages')
+
+I added the following line of code to these lines in the file: 103, 109, 155, 161
+        graphs['db_counter'].inc()
+
+
+Add Prometheus
+
+I found instructions to add prometheus to kubernetes and got it up and running: https://devopscube.com/setup-prometheus-monitoring-on-kubernetes/
+
+Next I needed to delete the minikube to rebuild the image: 
+        minikube delete
+
+Then i rebuilt the minikube using my rekube.sh script:
+        sh rekube.sh
+
+Since migrate and seeding are now seperate jobs, I needed to migrate the database just to run the web server:
+        kubectl apply -f migrate/migrate-db-job.yaml
+
+        Cynthias-MacBook-Pro-2:AppSecAssignment3.1 queenc$ kubectl get pods
+        NAME                                        READY   STATUS      RESTARTS   AGE
+        assignment3-django-deploy-8bf5b76f5-4lm97   1/1     Running     0          9m5s
+        migrate-vv726                               0/1     Completed   0          6s
+        mysql-container-77676c4fcc-jbw8q            1/1     Running     1          9m6s
+        proxy-6dcd56d44d-mqxbd                      1/1     Running     3          9m5s
+
+Then I was able to load the web application but could not buy anything since the database was empty, this produced 
+the database 404 errors we wanted to monitor from 3.2. Then I seeded the database with the job I created before:
+        kubectl apply -f migrate/seed-db.yaml 
+
+        Cynthias-MacBook-Pro-2:AppSecAssignment3.1 queenc$ kubectl get pods
+        NAME                                        READY   STATUS      RESTARTS   AGE
+        assignment3-django-deploy-8bf5b76f5-4lm97   1/1     Running     0          13m
+        migrate-vv726                               0/1     Completed   0          4m54s
+        mysql-container-77676c4fcc-jbw8q            1/1     Running     1          13m
+        proxy-6dcd56d44d-mqxbd                      1/1     Running     3          13m
+        seed-db-67qzs                               0/1     Completed   0          5s
+
+Then I registered a user, logged in, bought several giftcards and used some of them.
+Here is the prometheus output thats displayed on http://127.0.0.1:52016/metrics: 
+
+        # HELP python_request_r_posts_total The total number of register posts.
+        # TYPE python_request_r_posts_total counter
+        python_request_r_posts_total 1.0
+        # HELP python_request_r_posts_created The total number of register posts.
+        # TYPE python_request_r_posts_created gauge
+        python_request_r_posts_created 1.619021930804469e+09
+        # HELP python_request_l_posts_total The total number of login posts.
+        # TYPE python_request_l_posts_total counter
+        python_request_l_posts_total 2.0
+        # HELP python_request_l_posts_created The total number of login posts.
+        # TYPE python_request_l_posts_created gauge
+        python_request_l_posts_created 1.6190219308045096e+09
+        # HELP python_request_b_posts_total The total number of card buy posts.
+        # TYPE python_request_b_posts_total counter
+        python_request_b_posts_total 4.0
+        # HELP python_request_b_posts_created The total number of card buy posts.
+        # TYPE python_request_b_posts_created gauge
+        python_request_b_posts_created 1.6190219308045409e+09
+        # HELP python_request_g_posts_total The total number of card gift posts.
+        # TYPE python_request_g_posts_total counter
+        python_request_g_posts_total 0.0
+        # HELP python_request_g_posts_created The total number of card gift posts.
+        # TYPE python_request_g_posts_created gauge
+        python_request_g_posts_created 1.6190219308045702e+09
+        # HELP python_request_u_posts_total The total number of card use posts.
+        # TYPE python_request_u_posts_total counter
+        python_request_u_posts_total 3.0
+        # HELP python_request_u_posts_created The total number of card use posts.
+        # TYPE python_request_u_posts_created gauge
+        python_request_u_posts_created 1.6190219308045988e+09
+        # HELP database_error_return_404_total The total number of 404 error messages
+        # TYPE database_error_return_404_total counter
+        database_error_return_404_total 6.0
+        # HELP database_error_return_404_created The total number of 404 error messages
+        # TYPE database_error_return_404_created gauge
+        database_error_return_404_created 1.6190219308046277e+09
