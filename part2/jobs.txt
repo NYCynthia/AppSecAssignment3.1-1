@@ -1,6 +1,6 @@
 Migration Job: 
 
-I created a jobs folder with a migrate-db-job.yaml file. The part of the 
+I created a job folder with a migrate-db-job.yaml file. The part of the 
 config file that performs the migration is:
 
         command: ["/bin/sh", "-c"]
